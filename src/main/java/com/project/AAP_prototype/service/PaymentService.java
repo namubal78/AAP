@@ -1,12 +1,16 @@
 package com.project.AAP_prototype.service;
 
 import com.project.AAP_prototype.repository.PaymentRepository;
+import com.project.AAP_prototype.service.notification.NotificationService;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional; // 이 임포트가 필요합니다
 import org.springframework.web.client.RestTemplate;
 import java.util.Map;
 import com.project.AAP_prototype.entity.Payment;
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -33,13 +37,18 @@ import lombok.extern.slf4j.Slf4j; // 로깅 인터페이스 Slf4j 사용 선언
 @RequiredArgsConstructor
 public class PaymentService {
 
+    private final NotificationService notificationService; // 주입 추가
     private final PaymentRepository paymentRepository;
     private final RestTemplate restTemplate; // AapPrototypeApplication에서 등록한 Bean 주입
 
-    // 포트원 관리자 콘솔에서 확인 가능한 키 (보안을 위해 나중에 환경변수로 빼는 것이 좋습니다)
-    private final String API_KEY = "7767620761143508";
-    private final String API_SECRET = "bFR54lStXwfYuPF4ivstqvvN0u5neGtRfWAtQHOabhMkfpWrhIo66EvU0fgGtDHDdzVQqFQLkwoQCPe8";
+    // .env에 정의된 PORTONE_API_KEY 값을 주입받습니다.
+    @Value("${PORTONE_API_KEY}")
+    private String apiKey;
 
+    // .env에 정의된 PORTONE_API_SECRET 값을 주입받습니다.
+    @Value("${PORTONE_API_SECRET}")
+    private String apiSecret;
+    
     @Transactional // 선언적 트랜잭션 적용 
     /* 선언적 트랜잭션 
     비즈니스 로직과 트랜잭션 관리 코드를 분리하여, 
@@ -59,9 +68,10 @@ public class PaymentService {
             // 별도로 RestTemplate Bean 등록도 필요함(AapPrototypeApplication.java 혹은 별도 Config 클래스)
             String token = getPortOneToken();
 
-            // [보안 단계 2] 발급받은 토큰으로 포트원 서버에서 실제 결제 내역 조회
-            Long realPaidAmount = getAmountFromPortOne(impUid, token);
-
+            // [보안 단계 2] 발급받은 토큰으로 포트원 서버에서 실제 결제 데이터 조회
+            Map<String, Object> paymentData = getPaymentDataFromPortOne(impUid, token);
+            Long realPaidAmount = Long.valueOf(String.valueOf(paymentData.get("amount")));
+            
             // [보안 단계 3] 금액 대조 (프론트에서 보낸 금액 vs 실제 결제된 금액)
             if (!amount.equals(realPaidAmount)) {
                 throw new Exception("결제 금액 불일치: 보안 위협 감지");
@@ -74,9 +84,27 @@ public class PaymentService {
             payment.setBuyerName(buyerName);
             payment.setStatus("PAID"); 
             
-            return paymentRepository.save(payment);
+            // 포트원 응답 객체(예: responseBody)에서 receipt_url을 가져와 저장합니다.
+            String receiptUrl = (String) paymentData.get("receipt_url");
+            payment.setReceiptUrl(receiptUrl);
+
+            Payment savedPayment = paymentRepository.save(payment);
+
+            // 통합 알림 발송 (슬랙, 메일, SMS 등 한 번에)
+            notificationService.send("SUCCESS", "결제 성공 안내", Map.of(
+                "주문번호", merchantUid,
+                "금액", amount,
+                "구매자", buyerName
+            ));
+            return savedPayment;
+
         } catch (Exception e) {
             log.error("[Payment Error] 주문번호 {} 처리 중 오류 발생: {}", merchantUid, e.getMessage());
+            // 🚨 실패 알림 발송
+            notificationService.send("ERROR", "결제 실패 또는 보안 위협 감지: " + e.getMessage(), Map.of(
+                "주문번호", merchantUid,
+                "접속IP", httpRequest.getRemoteAddr()
+            ));
             throw e;
         }
     }
@@ -84,23 +112,70 @@ public class PaymentService {
     // 포트원 서버로부터 인증 토큰을 가져오는 로직
     private String getPortOneToken() {
         String url = "https://api.iamport.kr/users/getToken";
-        Map<String, String> body = Map.of("imp_key", API_KEY, "imp_secret", API_SECRET);
         
-        ResponseEntity<Map> response = restTemplate.postForEntity(url, body, Map.class);
-        Map<String, Object> res = (Map<String, Object>) response.getBody().get("response");
-        return (String) res.get("access_token");
+        // 하드코딩된 API_KEY, API_SECRET 대신 주입받은 필드 변수(apiKey, apiSecret)를 사용합니다.
+        Map<String, String> body = Map.of(
+            "imp_key", apiKey, 
+            "imp_secret", apiSecret
+        );
+        
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, body, Map.class);
+            Map<String, Object> res = (Map<String, Object>) response.getBody().get("response");
+            return (String) res.get("access_token");
+        } catch (Exception e) {
+            log.error("[Token Error] 포트원 토큰 발급 실패: {}", e.getMessage());
+            throw new RuntimeException("인증 토큰을 가져올 수 없습니다.");
+        }
     }
 
     // 결제 고유 번호로 실제 결제 정보를 가져오는 로직
-    private Long getAmountFromPortOne(String impUid, String token) {
+    private Map<String, Object> getPaymentDataFromPortOne(String impUid, String token) {
         String url = "https://api.iamport.kr/payments/" + impUid;
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
 
         HttpEntity<String> entity = new HttpEntity<>(headers);
         ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
-        Map<String, Object> res = (Map<String, Object>) response.getBody().get("response");
         
-        return Long.valueOf(String.valueOf(res.get("amount")));
+        // 포트원의 실제 응답 데이터인 'response' 안의 내용을 반환
+        return (Map<String, Object>) response.getBody().get("response");
+    }
+
+    @Transactional
+    public void refund(String merchantUid, String reason) throws Exception {
+        // 1. 포트원 인증 토큰 가져오기 (기존 메서드 재사용)
+        String token = getPortOneToken();
+
+        // 2. 포트원 환불 API 호출
+        String url = "https://api.iamport.kr/payments/cancel";
+        Map<String, String> body = Map.of(
+            "merchant_uid", merchantUid,
+            "reason", reason
+        );
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+            
+            // 3. DB 상태 업데이트
+            Payment payment = paymentRepository.findByOrderId(merchantUid)
+                    .orElseThrow(() -> new RuntimeException("결제 건을 찾을 수 없습니다."));
+            payment.setStatus("CANCELLED"); // 상태를 환불됨으로 변경
+            paymentRepository.save(payment);
+
+            // 4. 비동기 알림 전송 (슬랙/카카오 등)
+            notificationService.send("SUCCESS", "✅ 결제 취소 완료", Map.of(
+                "주문번호", merchantUid,
+                "취소사유", reason
+            ));
+
+        } catch (Exception e) {
+            notificationService.send("ERROR", "🚨 환불 처리 중 오류 발생", Map.of("주문번호", merchantUid));
+            throw e;
+        }
     }
 }

@@ -22,3 +22,10 @@ logging:
     com.project.AAP_prototype: info  # 우리 프로젝트 로그만 깔끔하게 출력
   pattern:
     console: "%d{HH:mm:ss} %-5level %logger{36} - %msg%n" # 로그 포맷 단순화
+slack:
+  webhook:
+    url: ${SLACK_WEBHOOK_URL}
+portone:
+  api:
+    key: ${PORTONE_API_KEY}
+    secret: ${PORTONE_API_SECRET}

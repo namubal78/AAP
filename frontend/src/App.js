@@ -1,6 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios'; // axios 라이브러리 사용
 
 function App() {
+
+  const [payments, setPayments] = useState([]); // 결제 목록 상태 관리
+
+  // 1. 페이지 로드 시 결제 목록 가져오기
+  useEffect(() => {
+    fetchPayments();
+  }, []);
+
   const handlePayment = () => {
     const { IMP } = window;
     IMP.init('imp77614466'); // 테스트용 식별코드
@@ -38,7 +47,7 @@ function App() {
         // 1-2. 디벨롭) [보안 가이드] 단순 데이터 전송 대신 고유 UID를 보내 백엔드에서 검증하게 함
         
         // 결제 성공 시 rsp 객체에 imp_uid가 생성되어 들어있습니다.
-        const response = await fetch('http://localhost:8080/api/payments/verify', {
+        const response = await fetch('http://localhost:8080/api/payments/verify', { // 프론트엔드가 3000번 포트에서 돌아갈 때 8080번 백엔드 API를 찾을 수 있도록
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -52,6 +61,7 @@ function App() {
 
         if (response.ok) {
           alert('금융권 수준 사후 검증 완료!');
+          fetchPayments(); // 결제 성공 후 목록 갱신
         }
 
       } else {
@@ -60,14 +70,110 @@ function App() {
     });
   };
 
+  // 결제 목록 가져오기 함수
+  const fetchPayments = async () => {
+      try {
+          // 상대 경로 대신 백엔드 전체 주소를 적어줍니다.
+          const res = await axios.get('http://localhost:8080/api/payments/list');
+          setPayments(res.data);
+      } catch (err) {
+          console.error("데이터 로드 실패:", err);
+      }
+  };
+
+  // 환불 버튼 클릭 시 실행
+  const handleRefund = async (merchantUid) => {
+      if(!window.confirm("정말 환불하시겠습니까?")) return;
+      
+      try {
+          // 백엔드의 @PostMapping("/refund") API 호출
+          await axios.post('http://localhost:8080/api/payments/refund', { // 프론트엔드가 3000번 포트에서 돌아갈 때 8080번 백엔드 API를 찾을 수 있도록
+              merchantUid, 
+              reason: "사용자 단순 변심" 
+          });
+          alert("환불이 완료되었습니다.");
+          fetchPayments(); // 환불 성공 후 목록 새로고침
+      } catch (err) {
+        alert("환불 실패: " + (err.response?.data || err.message));
+      }
+  };
+
   return (
-    <div style={{ textAlign: 'center', marginTop: '100px' }}>
-      <h1>결제 API 모의테스트</h1>
-      <button onClick={handlePayment} style={{ padding: '15px 30px', fontSize: '20px' }}>
-        카카오페이로 결제하기
-      </button>
-    </div>
-  );
-}
+  <div style={{ padding: '50px', textAlign: 'center' }}>
+        <h1>결제 및 환불 관리 시스템</h1>
+        
+        {/* 결제 버튼 */}
+        <button onClick={handlePayment} style={{ padding: '15px 30px', fontSize: '18px', marginBottom: '40px', cursor: 'pointer' }}>
+          새로운 결제하기 (1,000원)
+        </button>
+
+        <hr />
+
+        {/* 결제 목록 테이블 */}
+        <div style={{ marginTop: '30px' }}>
+          <h2>최근 결제 내역</h2>
+          <table border="1" style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f4f4f4' }}>
+                <th>주문번호</th>
+                <th>구매자</th>
+                <th>금액</th>
+                <th>상태</th>
+                <th>결제일</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.length > 0 ? (
+                payments.map((p) => (
+                  <tr key={p.id} style={{ textAlign: 'center' }}>
+                    <td>{p.orderId}</td>
+                    <td>{p.buyerName}</td>
+                    <td>{p.amount.toLocaleString()}원</td>
+                    <td style={{ color: p.status === 'CANCELLED' ? 'red' : 'blue', fontWeight: 'bold' }}>
+                      {p.status === 'PAID' ? '결제완료' : '환불완료'}
+                    </td>
+                    <td>{new Date(p.createdAt).toLocaleString()}</td>
+                    <td style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                      {/* 1. 환불 버튼 (기존) */}
+                      {p.status === 'PAID' && (
+                        <button 
+                          onClick={() => handleRefund(p.orderId)}
+                          style={{ backgroundColor: '#ff4d4f', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '4px' }}
+                        >
+                          환불하기
+                        </button>
+                      )}
+                      
+                      {/* 2. 영수증 버튼 추가 */}
+                      {p.receiptUrl ? (
+                        <button 
+                          onClick={() => window.open(p.receiptUrl, '_blank')}
+                          style={{ backgroundColor: '#4CAF50', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '4px' }}
+                        >
+                          영수증
+                        </button>
+                      ) : (
+                        <button 
+                          disabled
+                          style={{ backgroundColor: '#ccc', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'not-allowed' }}
+                        >
+                          미발급
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" style={{ padding: '20px' }}>결제 내역이 없습니다.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
 export default App;

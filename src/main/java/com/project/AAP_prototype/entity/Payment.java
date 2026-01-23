@@ -31,6 +31,8 @@ public class Payment {
     private String pgProvider;
     private LocalDateTime createdAt;
 
+    private String receiptUrl; // 포트원에서 주는 영수증 URL 저장용
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();

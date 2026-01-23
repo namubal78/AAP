@@ -4,6 +4,8 @@ import com.project.AAP_prototype.entity.Payment;
 import com.project.AAP_prototype.repository.PaymentRepository;
 import com.project.AAP_prototype.service.PaymentService; // Service 임포트
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,8 +16,7 @@ import java.util.Map; // Map 임포트 추가
 @RestController
 @RequestMapping("/api/payments")
 @RequiredArgsConstructor
-// @CrossOrigin(origins = "*") // 프론트엔드에서 오는 요청을 허용 (CORS 해결)
-@CrossOrigin(origins = "http://localhost:3000") // 보안을 위해 특정 도메인만 허용, 근데 사용자 도메인을 어떻게 특정?
+@CrossOrigin(origins = "http://localhost:3000", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
 public class PaymentController {
 
     private final PaymentRepository paymentRepository; // Repository 주입
@@ -74,9 +75,28 @@ public class PaymentController {
         }
     }
 
-    // 2. 전체 결제 내역 조회 API (제대로 저장됐는지 확인용)
+    // 전체 결제 내역 최신순 조회 API
     @GetMapping("/list")
     public ResponseEntity<List<Payment>> getAllPayments() {
-        return ResponseEntity.ok(paymentRepository.findAll());
+        return ResponseEntity.ok(paymentRepository.findAllByOrderByCreatedAtDesc());
+    }
+
+    // 환불(결제 취소) 요청 처리 API
+    @PostMapping("/refund")
+    public ResponseEntity<String> refundPayment(@RequestBody Map<String, String> request) {
+        try {
+            // 프론트엔드 App.js에서 보낸 merchantUid와 reason을 추출합니다.
+            String merchantUid = request.get("merchantUid");
+            String reason = request.get("reason");
+
+            // PaymentService에 이미 작성해둔 refund 로직을 호출합니다.
+            paymentService.refund(merchantUid, reason);
+            
+            return ResponseEntity.ok("환불 처리가 완료되었습니다.");
+        } catch (Exception e) {
+            // 환불 실패 시 에러 메시지 반환
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                 .body("환불 실패: " + e.getMessage());
+        }
     }
 }
