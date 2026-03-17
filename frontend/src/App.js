@@ -15,7 +15,7 @@ function App() {
     IMP.init('imp77614466'); // 테스트용 식별코드
 
     IMP.request_pay({
-      pg: "html5_inicis.INIpayTest",
+      pg: "kakaopay.TC0ONETIME",
       pay_method: "card",
       merchant_uid: `order_${new Date().getTime()}`,
       name: "블로그 프로젝트 결제 테스트 + 보안 강화",
