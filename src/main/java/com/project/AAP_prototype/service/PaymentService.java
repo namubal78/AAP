@@ -1,5 +1,6 @@
 package com.project.AAP_prototype.service;
 
+import com.project.AAP_prototype.exception.DuplicatePaymentException;
 import com.project.AAP_prototype.repository.PaymentRepository;
 import com.project.AAP_prototype.service.notification.NotificationService;
 
@@ -62,6 +63,12 @@ public class PaymentService {
 
         // 요청 진입 로그
         log.info("[Payment Request] MerchantUid: {}, ImpUid: {}, Amount: {}", merchantUid, impUid, amount);
+
+        // [멱등성 체크] 동일 주문번호 중복 요청 방지 (네트워크 재시도, 중복 클릭 등)
+        if (paymentRepository.existsByOrderId(merchantUid)) {
+            log.warn("[Duplicate] 이미 처리된 주문번호: {}", merchantUid);
+            throw new DuplicatePaymentException(merchantUid);
+        }
 
         try {
             // TODO: [개발 임시] PortOne V1 REST API가 kakaopay.TC0ONETIME(공용 테스트 MID) 결제를

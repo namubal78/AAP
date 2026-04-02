@@ -17,4 +17,7 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     // 2. 환불 처리용: 주문번호(merchant_uid)로 특정 결제 건 찾기
     Optional<Payment> findByOrderId(String orderId);
+
+    // 3. 멱등성 체크용: 주문번호 존재 여부 확인
+    boolean existsByOrderId(String orderId);
 }

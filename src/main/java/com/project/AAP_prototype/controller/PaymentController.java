@@ -1,6 +1,7 @@
 package com.project.AAP_prototype.controller;
 
 import com.project.AAP_prototype.entity.Payment;
+import com.project.AAP_prototype.exception.DuplicatePaymentException;
 import com.project.AAP_prototype.repository.PaymentRepository;
 import com.project.AAP_prototype.service.PaymentService; // Service 임포트
 import lombok.RequiredArgsConstructor;
@@ -69,9 +70,11 @@ public class PaymentController {
             Payment validatedPayment = paymentService.verifyAndSave(impUid, merchantUid, amount, buyerName, httpRequest);
             return ResponseEntity.ok(validatedPayment);
 
+        } catch (DuplicatePaymentException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
         } catch (Exception e) { // 예외 처리: 결제 금액이 다르거나 API 통신에 실패할 경우
             // 검증 실패 시 400 에러와 메시지 반환 (보안상 필수)
-            return ResponseEntity.badRequest().body("결제 보안 검증 실패: " +e.getMessage());
+            return ResponseEntity.badRequest().body("결제 보안 검증 실패: " + e.getMessage());
         }
     }
 
